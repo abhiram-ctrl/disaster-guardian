@@ -1,5 +1,3 @@
-// backend/server.js
-
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -14,9 +12,11 @@ app.use(cors());
 // Routers
 const incidentsRouter = require("./routes/incidents");
 const riskRouter = require("./routes/risk");
+const routeSafetyRouter = require("./routes/routeSafety");
 
 app.use("/api/incidents", incidentsRouter);
 app.use("/api/risk", riskRouter);
+app.use("/api/route", routeSafetyRouter);
 
 // MongoDB connect
 mongoose

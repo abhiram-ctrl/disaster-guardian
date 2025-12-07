@@ -1,1957 +1,1024 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+// web-client/src/App.js
+
+import React, { useEffect, useState } from "react";
+import axios from "axios";
 import {
   MapContainer,
   TileLayer,
   Marker,
-  Popup,
-  useMapEvents,
-  Polyline,
   Circle,
-} from 'react-leaflet';
-import L from 'leaflet';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts';
-import './App.css';
+  Popup,
+} from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 
-// Fix default marker icons for Leaflet in React
+// Fix default marker icon issue with Leaflet in React
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
   iconUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
   shadowUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-// Custom icons for severity levels
-const severityIcons = {
-  high: L.icon({
-    iconUrl:
-      'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
-    shadowUrl:
-      'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41],
-  }),
-  medium: L.icon({
-    iconUrl:
-      'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png',
-    shadowUrl:
-      'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41],
-  }),
-  low: L.icon({
-    iconUrl:
-      'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-    shadowUrl:
-      'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41],
-  }),
-};
-
-// Icon for user's own location
-const userIcon = L.icon({
-  iconUrl:
-    'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
-  shadowUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-
+// Use env var in production, localhost in dev
 const API_BASE =
-  process.env.REACT_APP_API_BASE || 'http://localhost:5000';
+  process.env.REACT_APP_API_BASE || "https://disaster-guardian-api.onrender.com";
 
-
-// Small helper component to handle map clicks
-function MapClickHandler({ onMapClick }) {
-  useMapEvents({
-    click(e) {
-      onMapClick(e.latlng);
-    },
-  });
-  return null;
-}
-
-// Haversine distance in km
-const toRad = (deg) => (deg * Math.PI) / 180;
-const distanceKm = (lat1, lng1, lat2, lng2) => {
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-// demo admin password
-const ADMIN_PASSWORD = 'guardian123';
 
 function App() {
+  // Core data
   const [incidents, setIncidents] = useState([]);
   const [loadingIncidents, setLoadingIncidents] = useState(false);
-  const [error, setError] = useState('');
+  const [incidentError, setIncidentError] = useState("");
 
-  // Filters: type, severity, time range, maxCount
-  const [filters, setFilters] = useState({
-    type: 'all',
-    severity: 'all',
-    timeRange: 'all',
-    maxCount: 'all',
+  // New: userId for voting
+  const [userId, setUserId] = useState("");
+  const [voteLoadingId, setVoteLoadingId] = useState(null);
+  const [voteError, setVoteError] = useState("");
+
+  // Form state: create incident
+  const [newIncident, setNewIncident] = useState({
+    type: "flood",
+    severity: "medium",
+    lat: "",
+    lng: "",
+    description: "",
   });
 
-  const [formData, setFormData] = useState({
-    type: 'flood',
-    severity: 'medium',
-    description: '',
-    lat: '',
-    lng: '',
-  });
+  // Risk checker
+  const [riskLat, setRiskLat] = useState("");
+  const [riskLng, setRiskLng] = useState("");
+  const [riskResult, setRiskResult] = useState(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskError, setRiskError] = useState("");
 
-  const [routeForm, setRouteForm] = useState({
-    startLat: '',
-    startLng: '',
-    endLat: '',
-    endLng: '',
-  });
+  // Map view
+  const [mapCenter, setMapCenter] = useState([16.5449, 81.5212]); // default: Bhimavaram
+  const [mapZoom, setMapZoom] = useState(6);
+  const [riskRadius] = useState(5000); // 5km circle for risk highlight
 
-  const [routeResult, setRouteResult] = useState(null);
-  const [routeError, setRouteError] = useState('');
+  // Simple admin toggle (for show/hide admin tools)
+  const [isAdmin] = useState(true);
 
-  const [showDensity, setShowDensity] = useState(true);
-
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminPassword, setAdminPassword] = useState('');
-  const [adminError, setAdminError] = useState('');
-
-  const [userLocation, setUserLocation] = useState(null);
-  const [userRiskText, setUserRiskText] = useState('');
-  const [locating, setLocating] = useState(false);
-
-  const [sosLoading, setSosLoading] = useState(false);
-
-  const [mapCenter, setMapCenter] = useState([16.5449, 81.5212]);
-  const [mapZoom, setMapZoom] = useState(13);
-
-  const [mapClickMode, setMapClickMode] = useState('incident');
-
-  const [timePlaybackEnabled, setTimePlaybackEnabled] = useState(false);
-  const [playbackSlider, setPlaybackSlider] = useState(100);
-
-  const [scenarioLoading, setScenarioLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [language, setLanguage] = useState('en');
-
-  const [proximityStats, setProximityStats] = useState(null);
-
-  // simple page navigation
-  const [activePage, setActivePage] = useState('dashboard'); // 'dashboard' | 'operations' | 'admin' | 'help'
-
-  // Fetch incidents when timeRange or maxCount changes
+  // ----------- INIT: create unique userId for this browser -------------
   useEffect(() => {
-    fetchIncidents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.timeRange, filters.maxCount]);
+    let stored = localStorage.getItem("dgUserId");
+    if (!stored) {
+      stored =
+        "u_" +
+        Date.now() +
+        "_" +
+        Math.random().toString(36).substring(2, 8);
+      localStorage.setItem("dgUserId", stored);
+    }
+    setUserId(stored);
+  }, []);
 
+  // ---------------- FETCH INCIDENTS ----------------
   const fetchIncidents = async () => {
-    setLoadingIncidents(true);
-    setError('');
     try {
-      let url = `${API_BASE}/api/incidents?`;
-
-      if (filters.timeRange !== 'all') {
-        url += `hours=${filters.timeRange}&`;
-      }
-      if (filters.maxCount !== 'all') {
-        url += `limit=${filters.maxCount}&`;
-      }
-
-      const res = await axios.get(url);
-      setIncidents(res.data);
+      setLoadingIncidents(true);
+      setIncidentError("");
+      const res = await axios.get(`${API_BASE}/api/incidents`);
+      setIncidents(res.data || []);
     } catch (err) {
-      console.error(err);
-      setError('Failed to load incidents.');
+      console.error("Error fetching incidents:", err);
+      setIncidentError("Failed to load incidents.");
     } finally {
       setLoadingIncidents(false);
     }
   };
 
-  // Apply type + severity filters on frontend
-  const filteredIncidents = incidents.filter((inc) => {
-    if (filters.type !== 'all' && inc.type !== filters.type) return false;
-    if (filters.severity !== 'all' && inc.severity !== filters.severity)
-      return false;
-    return true;
-  });
+  useEffect(() => {
+    fetchIncidents();
+  }, []);
 
-  // TIME PLAYBACK
-  let earliestTs = null;
-  let latestTs = null;
-  if (filteredIncidents.length > 0) {
-    const sortedByTime = [...filteredIncidents].sort(
-      (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-    );
-    earliestTs = new Date(sortedByTime[0].createdAt).getTime();
-    latestTs = new Date(
-      sortedByTime[sortedByTime.length - 1].createdAt
-    ).getTime();
-  }
-
-  let cutoffTs = null;
-  if (
-    timePlaybackEnabled &&
-    earliestTs !== null &&
-    latestTs !== null &&
-    playbackSlider >= 0 &&
-    playbackSlider <= 100
-  ) {
-    const span = latestTs - earliestTs;
-    cutoffTs = earliestTs + (span * playbackSlider) / 100;
-  }
-
-  // final visible incidents on UI
-  let displayIncidents = filteredIncidents;
-  if (timePlaybackEnabled && cutoffTs !== null) {
-    displayIncidents = filteredIncidents.filter((inc) => {
-      const t = new Date(inc.createdAt).getTime();
-      return t <= cutoffTs;
-    });
-  }
-
-  // STATS
-  const totalIncidents = incidents.length;
-  const visibleIncidents = displayIncidents.length;
-  const highSeverityIncidents = displayIncidents.filter(
-    (inc) => inc.severity === 'high'
-  ).length;
-
-  let overallRisk = 'No data';
-  if (visibleIncidents > 0) {
-    if (highSeverityIncidents >= 5) {
-      overallRisk = 'Critical';
-    } else if (highSeverityIncidents >= 2) {
-      overallRisk = 'Elevated';
-    } else {
-      overallRisk = 'Normal';
-    }
-  }
-
-  // overview card color
-  const overviewBg =
-    overallRisk === 'Critical'
-      ? '#fee2e2'
-      : overallRisk === 'Elevated'
-      ? '#fffbeb'
-      : '#ecfdf3';
-
-  // CHART DATA
-  const typeCountsMap = {};
-  displayIncidents.forEach((inc) => {
-    typeCountsMap[inc.type] = (typeCountsMap[inc.type] || 0) + 1;
-  });
-  const typeChartData = Object.entries(typeCountsMap).map(
-    ([type, count]) => ({
-      type: type.toUpperCase(),
-      count,
-    })
-  );
-
-  const severityCountsMap = {};
-  displayIncidents.forEach((inc) => {
-    severityCountsMap[inc.severity] =
-      (severityCountsMap[inc.severity] || 0) + 1;
-  });
-  const severityChartData = Object.entries(severityCountsMap).map(
-    ([severity, count]) => ({
-      severity: severity.toUpperCase(),
-      count,
-    })
-  );
-
-  // CREATE INCIDENT
+  // ---------------- CREATE INCIDENT ----------------
   const handleCreateIncident = async (e) => {
     e.preventDefault();
-    setError('');
-
-    const { type, severity, description, lat, lng } = formData;
-
-    if (!type || lat === '' || lng === '') {
-      setError('Type, latitude and longitude are required.');
-      return;
-    }
 
     try {
-      await axios.post(`${API_BASE}/api/incidents`, {
-        type,
-        severity,
-        description,
-        lat: parseFloat(lat),
-        lng: parseFloat(lng),
-      });
+      const payload = {
+        ...newIncident,
+        lat: Number(newIncident.lat),
+        lng: Number(newIncident.lng),
+      };
 
-      setFormData({
-        type: 'flood',
-        severity: 'medium',
-        description: '',
-        lat: '',
-        lng: '',
+      await axios.post(`${API_BASE}/api/incidents`, payload);
+      setNewIncident({
+        type: "flood",
+        severity: "medium",
+        lat: "",
+        lng: "",
+        description: "",
       });
-
       fetchIncidents();
     } catch (err) {
-      console.error(err);
-      setError('Failed to create incident.');
+      console.error("Error creating incident:", err);
+      alert("Failed to create incident.");
     }
   };
 
-  // DELETE INCIDENT
+  // ---------------- DELETE INCIDENT (admin) ----------------
   const handleDeleteIncident = async (id) => {
-    if (!isAdmin) {
-      alert('Only admin can delete incidents.');
-      return;
-    }
-
-    const confirmDelete = window.confirm(
-      'Are you sure you want to delete this incident?'
-    );
-    if (!confirmDelete) return;
+    if (!window.confirm("Delete this incident?")) return;
 
     try {
       await axios.delete(`${API_BASE}/api/incidents/${id}`);
       fetchIncidents();
     } catch (err) {
-      console.error(err);
-      alert('Failed to delete incident.');
+      console.error("Error deleting incident:", err);
+      alert("Failed to delete incident.");
     }
   };
 
-  // ROUTE SAFETY
-  const handleRouteCheck = async (e) => {
-    e.preventDefault();
-    setRouteError('');
-    setRouteResult(null);
+  // ---------------- NEW: VOTE ON INCIDENT ----------------
+  const handleVoteOnIncident = async (incidentId, action) => {
+    if (!userId) {
+      alert("User ID not ready yet, please wait a second and try again.");
+      return;
+    }
 
-    const { startLat, startLng, endLat, endLng } = routeForm;
-
-    if (
-      startLat === '' ||
-      startLng === '' ||
-      endLat === '' ||
-      endLng === ''
-    ) {
-      setRouteError('Start and end coordinates are required.');
+    if (action !== "confirm" && action !== "flag") {
       return;
     }
 
     try {
-      const res = await axios.post(`${API_BASE}/api/route/safety`, {
-        start: {
-          lat: parseFloat(startLat),
-          lng: parseFloat(startLng),
-        },
-        end: {
-          lat: parseFloat(endLat),
-          lng: parseFloat(endLng),
-        },
+      setVoteError("");
+      setVoteLoadingId(incidentId);
+
+      await axios.post(`${API_BASE}/api/incidents/${incidentId}/vote`, {
+        userId,
+        vote: action,
       });
 
-      setRouteResult(res.data);
+      // Refresh incidents so UI shows updated status & counts
+      await fetchIncidents();
     } catch (err) {
-      console.error(err);
-      setRouteError('Failed to check route safety.');
+      console.error("Error voting on incident:", err);
+      setVoteError("Failed to record your vote.");
+    } finally {
+      setVoteLoadingId(null);
     }
   };
 
-  // MAP CLICK BEHAVIOUR
-  const handleMapClick = (latlng) => {
-    const { lat, lng } = latlng;
+  // ---------------- RISK CHECK ----------------
+  const handleRiskCheck = async (e) => {
+    e.preventDefault();
+    setRiskResult(null);
+    setRiskError("");
 
-    if (mapClickMode === 'incident') {
-      setFormData((prev) => ({
-        ...prev,
-        lat: lat.toFixed(5),
-        lng: lng.toFixed(5),
-      }));
-    } else if (mapClickMode === 'routeStart') {
-      setRouteForm((prev) => ({
-        ...prev,
-        startLat: lat.toFixed(5),
-        startLng: lng.toFixed(5),
-      }));
-    } else if (mapClickMode === 'routeEnd') {
-      setRouteForm((prev) => ({
-        ...prev,
-        endLat: lat.toFixed(5),
-        endLng: lng.toFixed(5),
-      }));
-    }
-  };
-
-  const hasRouteCoords =
-    routeForm.startLat &&
-    routeForm.startLng &&
-    routeForm.endLat &&
-    routeForm.endLng;
-
-  const routeLinePositions = hasRouteCoords
-    ? [
-        [parseFloat(routeForm.startLat), parseFloat(routeForm.startLng)],
-        [parseFloat(routeForm.endLat), parseFloat(routeForm.endLng)],
-      ]
-    : [];
-
-  const getRadiusForSeverity = (severity) => {
-    if (severity === 'high') return 500;
-    if (severity === 'medium') return 300;
-    return 150;
-  };
-
-  const getColorForSeverity = (severity) => {
-    if (severity === 'high') return 'red';
-    if (severity === 'medium') return 'orange';
-    return 'green';
-  };
-
-  // ADMIN
-  const handleAdminLogin = () => {
-    if (adminPassword === ADMIN_PASSWORD) {
-      setIsAdmin(true);
-      setAdminError('');
-    } else {
-      setIsAdmin(false);
-      setAdminError('Incorrect password');
-    }
-  };
-
-  const handleAdminLogout = () => {
-    setIsAdmin(false);
-    setAdminPassword('');
-    setAdminError('');
-  };
-
-  // LOCATE ME + PROXIMITY
-  const handleLocateMe = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser.');
+    if (!riskLat || !riskLng) {
+      setRiskError("Please enter both latitude and longitude.");
       return;
     }
-    setLocating(true);
+
+    try {
+      setRiskLoading(true);
+      const res = await axios.post(`${API_BASE}/api/risk/check`, {
+        lat: Number(riskLat),
+        lng: Number(riskLng),
+      });
+      setRiskResult(res.data);
+      setMapCenter([Number(riskLat), Number(riskLng)]);
+      setMapZoom(10);
+    } catch (err) {
+      console.error("Risk check error:", err);
+      setRiskError("Failed to check risk.");
+    } finally {
+      setRiskLoading(false);
+    }
+  };
+
+  const handleUseMyLocationForRisk = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocating(false);
         const { latitude, longitude } = pos.coords;
-        setUserLocation([latitude, longitude]);
+        setRiskLat(latitude.toFixed(6));
+        setRiskLng(longitude.toFixed(6));
         setMapCenter([latitude, longitude]);
-        setMapZoom(14);
-
-        if (displayIncidents.length === 0) {
-          setUserRiskText(
-            'No incidents currently visible near you (based on filters and timeline).'
-          );
-          setProximityStats(null);
-          return;
-        }
-
-        let minDist = Infinity;
-        let nearest = null;
-        displayIncidents.forEach((inc) => {
-          const d = distanceKm(latitude, longitude, inc.lat, inc.lng);
-          if (d < minDist) {
-            minDist = d;
-            nearest = inc;
-          }
-        });
-
-        if (!nearest) {
-          setUserRiskText(
-            'No incidents currently visible near you (based on filters and timeline).'
-          );
-          setProximityStats(null);
-          return;
-        }
-
-        const roundedDist = minDist.toFixed(2);
-        setUserRiskText(
-          `Nearest incident is a ${nearest.severity.toUpperCase()} ${nearest.type.toUpperCase()} about ${roundedDist} km away.`
-        );
-
-        const buckets = [
-          { label: '1 km', radiusKm: 1 },
-          { label: '3 km', radiusKm: 3 },
-          { label: '5 km', radiusKm: 5 },
-        ];
-
-        const stats = buckets.map((b) => {
-          const within = displayIncidents.filter((inc) => {
-            const d = distanceKm(latitude, longitude, inc.lat, inc.lng);
-            return d <= b.radiusKm;
-          });
-          const highCount = within.filter(
-            (inc) => inc.severity === 'high'
-          ).length;
-          return {
-            label: b.label,
-            radiusKm: b.radiusKm,
-            total: within.length,
-            high: highCount,
-          };
-        });
-
-        setProximityStats(stats);
+        setMapZoom(11);
       },
-      (err) => {
-        console.error(err);
-        setLocating(false);
-        alert('Unable to get your location.');
+      () => {
+        alert("Could not get your location.");
       }
     );
   };
 
-  // QUICK SOS
-  const handleQuickSOS = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser.');
-      return;
-    }
-    setSosLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const { latitude, longitude } = pos.coords;
-          await axios.post(`${API_BASE}/api/incidents`, {
-            type: 'accident',
-            severity: 'high',
-            description: 'Quick SOS from user location',
-            lat: latitude,
-            lng: longitude,
-          });
-          setUserLocation([latitude, longitude]);
-          setMapCenter([latitude, longitude]);
-          setMapZoom(15);
-          fetchIncidents();
-          alert('SOS reported successfully.');
-        } catch (err) {
-          console.error(err);
-          alert('Failed to send SOS.');
-        } finally {
-          setSosLoading(false);
-        }
-      },
-      (err) => {
-        console.error(err);
-        setSosLoading(false);
-        alert('Unable to get your location for SOS.');
-      }
-    );
-  };
-
-  // VOICE INPUT
-  const handleStartVoice = () => {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Voice input is not supported in this browser.');
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    setIsRecording(true);
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setFormData((prev) => ({
-        ...prev,
-        description: transcript,
-      }));
-      setIsRecording(false);
-    };
-
-    recognition.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      alert('Error during voice recognition.');
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognition.start();
-  };
-
-  // DEMO SCENARIOS
-  const randInRange = (min, max) => Math.random() * (max - min) + min;
-
-  const handleScenario = async (scenario) => {
-    if (!isAdmin) {
-      alert('Only admin can run simulations.');
-      return;
-    }
-
-    setScenarioLoading(true);
-    setError('');
+  // ---------------- ADMIN SIMULATION HELPERS ----------------
+  const handleSeedSimulation = async (type = "flood") => {
     try {
-      let centerLat = 16.5449;
-      let centerLng = 81.5212;
-      let incidentsToCreate = [];
-
-      if (scenario === 'bhimavaramFlood') {
-        centerLat = 16.5449;
-        centerLng = 81.5212;
-        const count = 20;
-        for (let i = 0; i < count; i++) {
-          const offsetLat = randInRange(-0.02, 0.02);
-          const offsetLng = randInRange(-0.02, 0.02);
-          const severityRand = Math.random();
-          let severity = 'medium';
-          if (severityRand > 0.7) severity = 'high';
-          else if (severityRand < 0.3) severity = 'low';
-
-          incidentsToCreate.push({
-            type: 'flood',
-            severity,
-            description: 'Simulated flood hotspot in Bhimavaram',
-            lat: centerLat + offsetLat,
-            lng: centerLng + offsetLng,
-          });
-        }
-      } else if (scenario === 'cityStorm') {
-        centerLat = 17.385;
-        centerLng = 78.4867;
-        const count = 25;
-        const types = ['storm', 'flood', 'accident'];
-        for (let i = 0; i < count; i++) {
-          const offsetLat = randInRange(-0.05, 0.05);
-          const offsetLng = randInRange(-0.05, 0.05);
-          const severityRand = Math.random();
-          let severity = 'medium';
-          if (severityRand > 0.75) severity = 'high';
-          else if (severityRand < 0.25) severity = 'low';
-
-          const type = types[Math.floor(Math.random() * types.length)];
-
-          incidentsToCreate.push({
-            type,
-            severity,
-            description: 'Simulated city-wide storm impact',
-            lat: centerLat + offsetLat,
-            lng: centerLng + offsetLng,
-          });
-        }
-      }
-
-      await Promise.all(
-        incidentsToCreate.map((inc) =>
-          axios.post(`${API_BASE}/api/incidents`, inc)
-        )
-      );
-
-      setMapCenter([centerLat, centerLng]);
-      setMapZoom(13);
+      await axios.post(`${API_BASE}/api/incidents/seed`, { type });
       fetchIncidents();
     } catch (err) {
-      console.error(err);
-      setError('Failed to generate demo scenario.');
-    } finally {
-      setScenarioLoading(false);
+      console.error("Error seeding simulation:", err);
+      alert("Failed to seed simulation incidents.");
     }
   };
 
-  // CLEAR DEMO
-  const handleClearDemoData = async () => {
-    if (!isAdmin) {
-      alert('Enable Admin Mode to clear demo data.');
-      return;
-    }
-    setScenarioLoading(true);
-    setError('');
+  const handleClearSimulations = async () => {
+    if (!window.confirm("Clear all simulation incidents?")) return;
     try {
-      const demoIncidents = incidents.filter(
-        (inc) =>
-          inc.description &&
-          inc.description.startsWith('Simulated ')
-      );
-
-      if (demoIncidents.length === 0) {
-        alert('No simulated demo incidents found to clear.');
-        setScenarioLoading(false);
-        return;
-      }
-
-      const confirmClear = window.confirm(
-        `This will delete ${demoIncidents.length} simulated incidents. Continue?`
-      );
-      if (!confirmClear) {
-        setScenarioLoading(false);
-        return;
-      }
-
-      await Promise.all(
-        demoIncidents.map((inc) =>
-          axios.delete(`${API_BASE}/api/incidents/${inc._id}`)
-        )
-      );
-
+      await axios.delete(`${API_BASE}/api/incidents/clear-simulations`);
       fetchIncidents();
     } catch (err) {
-      console.error(err);
-      setError('Failed to clear demo data.');
-    } finally {
-      setScenarioLoading(false);
+      console.error("Error clearing simulations:", err);
+      alert("Failed to clear simulation incidents.");
     }
   };
 
-  // EXPORT CSV
-  const handleExportCSV = () => {
-    if (displayIncidents.length === 0) {
-      alert('No incidents to export for current filters / timeline.');
-      return;
+  // ---------------- UTILS ----------------
+  const getVerificationBadgeStyles = (status) => {
+    switch (status) {
+      case "verified":
+        return {
+          background: "#dcfce7",
+          color: "#166534",
+        };
+      case "suspicious":
+        return {
+          background: "#fee2e2",
+          color: "#b91c1c",
+        };
+      default:
+        return {
+          background: "#e5e7eb",
+          color: "#374151",
+        };
     }
-
-    const headers = [
-      'type',
-      'severity',
-      'description',
-      'lat',
-      'lng',
-      'createdAt',
-    ];
-
-    const rows = displayIncidents.map((inc) => [
-      inc.type,
-      inc.severity,
-      (inc.description || '').replace(/[\n\r,]+/g, ' '),
-      inc.lat,
-      inc.lng,
-      new Date(inc.createdAt).toISOString(),
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((r) => r.join(',')),
-    ].join('\n');
-
-    const blob = new Blob([csvContent], {
-      type: 'text/csv;charset=utf-8;',
-    });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'disaster_guardian_incidents.csv';
-    a.click();
-
-    URL.revokeObjectURL(url);
   };
 
-  // language helper
-  const t = (en, te) => (language === 'en' ? en : te);
-
+  // ---------------- RENDER ----------------
   return (
-    <div className="app-root">
-      <header className="app-header">
-        <div className="header-left">
-          <h1>{t('Disaster Guardian', 'Disaster Guardian')}</h1>
-          <p className="app-subtitle">
-            {t(
-              'Smart incident & crowd safety console',
-              'స్మార్ట్ సంఘటన & క్రౌడ్ భద్రతా కన్సోల్'
-            )}
-          </p>
-        </div>
-        <div className="header-right">
-          <span className="env-pill">
-            {t('Web Dashboard', 'వెబ్ డ్యాష్‌బోర్డ్')}
-          </span>
-          <div className="lang-toggle">
-            <span>{t('Language:', 'భాష:')}</span>
-            <button
-              onClick={() => setLanguage('en')}
-              className={language === 'en' ? 'lang-btn active' : 'lang-btn'}
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#0f172a",
+        color: "#e5e7eb",
+        padding: "1.5rem",
+        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          background: "#020617",
+          borderRadius: "1rem",
+          padding: "1.5rem",
+          boxShadow: "0 25px 50px -12px rgba(15,23,42,0.8)",
+          border: "1px solid #1e293b",
+        }}
+      >
+        {/* Header */}
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: "1rem",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                fontSize: "1.8rem",
+                fontWeight: 700,
+                margin: 0,
+                color: "#e5e7eb",
+              }}
             >
-              EN
-            </button>
-            <button
-              onClick={() => setLanguage('te')}
-              className={language === 'te' ? 'lang-btn active' : 'lang-btn'}
+              Disaster Guardian
+            </h1>
+            <p
+              style={{
+                margin: "0.4rem 0 0",
+                fontSize: "0.95rem",
+                color: "#9ca3af",
+              }}
             >
-              TE
-            </button>
+              Real-time disaster reporting, verification, and risk intelligence
+              dashboard.
+            </p>
           </div>
-        </div>
-      </header>
+          <div
+            style={{
+              textAlign: "right",
+              fontSize: "0.8rem",
+              color: "#6b7280",
+            }}
+          >
+            <div>User ID: {userId || "…"}</div>
+            <div>API: {API_BASE}</div>
+          </div>
+        </header>
 
-      <nav className="app-nav">
-        <button
-          className={
-            activePage === 'dashboard' ? 'nav-btn active' : 'nav-btn'
-          }
-          onClick={() => setActivePage('dashboard')}
+        {/* Top layout: Map + Risk checker */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "2fr 1fr",
+            gap: "1rem",
+            marginBottom: "1.5rem",
+          }}
         >
-          {t('Dashboard', 'డ్యాష్‌బోర్డ్')}
-        </button>
-        <button
-          className={
-            activePage === 'operations' ? 'nav-btn active' : 'nav-btn'
-          }
-          onClick={() => setActivePage('operations')}
-        >
-          {t('Live Operations', 'లైవ్ ఆపరేషన్‌లు')}
-        </button>
-        <button
-          className={
-            activePage === 'admin' ? 'nav-btn active' : 'nav-btn'
-          }
-          onClick={() => setActivePage('admin')}
-        >
-          {t('Admin & Simulations', 'అడ్మిన్ & సిమ్యులేషన్స్')}
-        </button>
-        <button
-          className={
-            activePage === 'help' ? 'nav-btn active' : 'nav-btn'
-          }
-          onClick={() => setActivePage('help')}
-        >
-          {t('Help / About', 'హెల్ప్ / గురించి')}
-        </button>
-      </nav>
-
-      {error && (
-        <div className="error-banner">
-          {error}
-        </div>
-      )}
-
-      <main className="app-main">
-        {/* DASHBOARD PAGE */}
-        {activePage === 'dashboard' && (
-          <div className="page-grid">
-            <div className="column">
-              <section
-                className="card card-overview"
-                style={{ backgroundColor: overviewBg }}
-              >
-                <h2>{t('Overview', 'సారాంశం')}</h2>
-                <p>
-                  <strong>
-                    {t(
-                      'Total incidents (time/max filter):',
-                      'మొత్తం సంఘటనలు (ఫిల్టర్ల తర్వాత):'
-                    )}
-                  </strong>{' '}
-                  {totalIncidents}
-                </p>
-                <p>
-                  <strong>
-                    {t(
-                      'Visible after all filters & timeline:',
-                      'అన్ని ఫిల్టర్ల & టైమ్‌లైన్ తర్వాత కనిపించే సంఘటనలు:'
-                    )}
-                  </strong>{' '}
-                  {visibleIncidents}
-                </p>
-                <p>
-                  <strong>
-                    {t(
-                      'High severity incidents (visible):',
-                      'హై సీవిరిటీ సంఘటనలు (కనిపిస్తున్నవి):'
-                    )}
-                  </strong>{' '}
-                  {highSeverityIncidents}
-                </p>
-                <p>
-                  <strong>
-                    {t('Overall risk level:', 'మొత్తం రిస్క్ స్థాయి:')}
-                  </strong>{' '}
-                  {overallRisk}
-                </p>
-              </section>
-
-              <section className="card">
-                <h2>{t('Analytics', 'విశ్లేషణ')}</h2>
-                {displayIncidents.length === 0 ? (
-                  <p>
-                    {t(
-                      'No data available for current filters / timeline.',
-                      'ప్రస్తుత ఫిల్టర్ల / టైమ్‌లైన్‌కి డేటా లేదు.'
-                    )}
-                  </p>
-                ) : (
-                  <>
-                    <h4>
-                      {t('Incidents by Type', 'రకం వారీగా సంఘటనలు')}
-                    </h4>
-                    <div className="chart-wrapper">
-                      <ResponsiveContainer>
-                        <BarChart data={typeChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="type" />
-                          <YAxis allowDecimals={false} />
-                          <Tooltip />
-                          <Legend />
-                          <Bar
-                            dataKey="count"
-                            name={t('Incidents', 'సంఘటనలు')}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    <h4 style={{ marginTop: '0.75rem' }}>
-                      {t(
-                        'Incidents by Severity',
-                        'సీవిరిటీ వారీగా సంఘటనలు'
-                      )}
-                    </h4>
-                    <div className="chart-wrapper">
-                      <ResponsiveContainer>
-                        <BarChart data={severityChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="severity" />
-                          <YAxis allowDecimals={false} />
-                          <Tooltip />
-                          <Legend />
-                          <Bar
-                            dataKey="count"
-                            name={t('Incidents', 'సంఘటనలు')}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </>
-                )}
-              </section>
+          {/* Map */}
+          <section
+            style={{
+              borderRadius: "0.75rem",
+              overflow: "hidden",
+              border: "1px solid #1f2937",
+              background: "#020617",
+            }}
+          >
+            <div
+              style={{
+                padding: "0.75rem 1rem",
+                borderBottom: "1px solid #1f2937",
+                fontSize: "0.9rem",
+                color: "#e5e7eb",
+              }}
+            >
+              Live Incident Map
             </div>
+            <div style={{ height: "320px" }}>
+              <MapContainer
+                center={mapCenter}
+                zoom={mapZoom}
+                style={{ width: "100%", height: "100%" }}
+              >
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution="&copy; OpenStreetMap contributors"
+                />
+                {riskLat && riskLng && (
+                  <Circle
+                    center={[
+                      Number(riskLat) || mapCenter[0],
+                      Number(riskLng) || mapCenter[1],
+                    ]}
+                    radius={riskRadius}
+                    pathOptions={{ color: "#38bdf8", fillOpacity: 0.15 }}
+                  />
+                )}
+                {incidents.map((inc) => (
+                  <Marker key={inc._id} position={[inc.lat, inc.lng]}>
+                    <Popup>
+                      <div style={{ fontSize: "0.8rem" }}>
+                        <div>
+                          <strong>{inc.type.toUpperCase()}</strong> (
+                          {inc.severity})
+                        </div>
+                        <div>{inc.description}</div>
+                        <div>
+                          Status:{" "}
+                          <strong>
+                            {inc.verificationStatus
+                              ? inc.verificationStatus.toUpperCase()
+                              : "UNVERIFIED"}
+                          </strong>
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
+          </section>
 
-            <div className="column">
-              <section className="card">
-                <h2>{t('Filters', 'ఫిల్టర్లు')}</h2>
+          {/* Risk checker */}
+          <section
+            style={{
+              borderRadius: "0.75rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              padding: "0.75rem 1rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "1rem",
+                margin: 0,
+                color: "#e5e7eb",
+              }}
+            >
+              Check Risk at Location
+            </h2>
 
-                <div className="form-row">
-                  <label>
-                    {t('Type:', 'రకం:')}
-                    <select
-                      value={filters.type}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          type: e.target.value,
-                        }))
-                      }
+            <form onSubmit={handleRiskCheck} style={{ display: "grid", gap: "0.5rem" }}>
+              <label style={{ fontSize: "0.85rem" }}>
+                Latitude
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={riskLat}
+                  onChange={(e) => setRiskLat(e.target.value)}
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                />
+              </label>
+              <label style={{ fontSize: "0.85rem" }}>
+                Longitude
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={riskLng}
+                  onChange={(e) => setRiskLng(e.target.value)}
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                />
+              </label>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  marginTop: "0.25rem",
+                }}
+              >
+                <button
+                  type="submit"
+                  disabled={riskLoading}
+                  style={{
+                    flex: 1,
+                    padding: "0.45rem 0.6rem",
+                    borderRadius: "0.5rem",
+                    border: "none",
+                    background:
+                      "linear-gradient(to right, #22c55e, #16a34a)",
+                    color: "#0b1120",
+                    fontWeight: 600,
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  {riskLoading ? "Checking..." : "Check Risk"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUseMyLocationForRisk}
+                  style={{
+                    flex: 1,
+                    padding: "0.45rem 0.6rem",
+                    borderRadius: "0.5rem",
+                    border: "1px solid #334155",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Use My Location
+                </button>
+              </div>
+            </form>
+
+            {riskError && (
+              <div
+                style={{
+                  marginTop: "0.25rem",
+                  fontSize: "0.8rem",
+                  color: "#f87171",
+                }}
+              >
+                {riskError}
+              </div>
+            )}
+
+            {riskResult && (
+              <div
+                style={{
+                  marginTop: "0.5rem",
+                  fontSize: "0.85rem",
+                  padding: "0.5rem 0.6rem",
+                  borderRadius: "0.5rem",
+                  background: "#020617",
+                  border: "1px solid #1f2937",
+                  color: "#e5e7eb",
+                }}
+              >
+                <div>
+                  <strong>Risk Level:</strong> {riskResult.riskLevel}
+                </div>
+                <div>
+                  <strong>Nearby Incidents:</strong>{" "}
+                  {riskResult.nearbyCount ?? "N/A"}
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Bottom layout: Operations + Incidents + Admin */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.5fr 1.5fr 1fr",
+            gap: "1rem",
+          }}
+        >
+          {/* Create incident */}
+          <section
+            style={{
+              borderRadius: "0.75rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              padding: "0.75rem 1rem",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "1rem",
+                margin: 0,
+                marginBottom: "0.5rem",
+                color: "#e5e7eb",
+              }}
+            >
+              Report Incident
+            </h2>
+            <form
+              onSubmit={handleCreateIncident}
+              style={{ display: "grid", gap: "0.5rem" }}
+            >
+              <label style={{ fontSize: "0.85rem" }}>
+                Type
+                <select
+                  value={newIncident.type}
+                  onChange={(e) =>
+                    setNewIncident((prev) => ({
+                      ...prev,
+                      type: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  <option value="flood">Flood</option>
+                  <option value="fire">Fire</option>
+                  <option value="earthquake">Earthquake</option>
+                  <option value="accident">Accident</option>
+                  <option value="landslide">Landslide</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: "0.85rem" }}>
+                Severity
+                <select
+                  value={newIncident.severity}
+                  onChange={(e) =>
+                    setNewIncident((prev) => ({
+                      ...prev,
+                      severity: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+
+              <label style={{ fontSize: "0.85rem" }}>
+                Latitude
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={newIncident.lat}
+                  onChange={(e) =>
+                    setNewIncident((prev) => ({
+                      ...prev,
+                      lat: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: "0.85rem" }}>
+                Longitude
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={newIncident.lng}
+                  onChange={(e) =>
+                    setNewIncident((prev) => ({
+                      ...prev,
+                      lng: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                  }}
+                />
+              </label>
+
+              <label style={{ fontSize: "0.85rem" }}>
+                Description
+                <textarea
+                  rows={3}
+                  value={newIncident.description}
+                  onChange={(e) =>
+                    setNewIncident((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "0.2rem",
+                    padding: "0.35rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #374151",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.85rem",
+                    resize: "vertical",
+                  }}
+                />
+              </label>
+
+              <button
+                type="submit"
+                style={{
+                  marginTop: "0.35rem",
+                  padding: "0.45rem 0.6rem",
+                  borderRadius: "0.5rem",
+                  border: "none",
+                  background:
+                    "linear-gradient(to right, #3b82f6, #0ea5e9)",
+                  color: "#0b1120",
+                  fontWeight: 600,
+                  fontSize: "0.85rem",
+                  cursor: "pointer",
+                }}
+              >
+                Submit Incident
+              </button>
+            </form>
+          </section>
+
+          {/* All incidents list with verification & voting */}
+          <section
+            style={{
+              borderRadius: "0.75rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              padding: "0.75rem 1rem",
+              overflowY: "auto",
+              maxHeight: "360px",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "1rem",
+                margin: 0,
+                marginBottom: "0.5rem",
+                color: "#e5e7eb",
+              }}
+            >
+              All Incidents
+            </h2>
+
+            {loadingIncidents && (
+              <div style={{ fontSize: "0.85rem", color: "#9ca3af" }}>
+                Loading incidents…
+              </div>
+            )}
+            {incidentError && (
+              <div style={{ fontSize: "0.85rem", color: "#f97373" }}>
+                {incidentError}
+              </div>
+            )}
+            {voteError && (
+              <div style={{ fontSize: "0.85rem", color: "#f97373" }}>
+                {voteError}
+              </div>
+            )}
+
+            {!loadingIncidents && incidents.length === 0 && (
+              <div style={{ fontSize: "0.85rem", color: "#9ca3af" }}>
+                No incidents reported yet.
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: "0.5rem" }}>
+              {incidents.map((inc) => {
+                const status = inc.verificationStatus || "unverified";
+                const badgeStyles = getVerificationBadgeStyles(status);
+                const confirmVoters = inc.confirmVoters || [];
+                const flagVoters = inc.flagVoters || [];
+                const hasVoted =
+                  (userId && confirmVoters.includes(userId)) ||
+                  (userId && flagVoters.includes(userId));
+
+                return (
+                  <div
+                    key={inc._id}
+                    style={{
+                      borderRadius: "0.5rem",
+                      border: "1px solid #1f2937",
+                      padding: "0.5rem 0.6rem",
+                      background: "#020617",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "0.5rem",
+                      }}
                     >
-                      <option value="all">{t('All', 'అన్నీ')}</option>
-                      <option value="flood">{t('Flood', 'వరద')}</option>
-                      <option value="fire">
-                        {t('Fire', 'అగ్ని ప్రమాదం')}
-                      </option>
-                      <option value="accident">
-                        {t('Accident', 'రోడ్ ప్రమాదం')}
-                      </option>
-                      <option value="storm">
-                        {t('Storm', 'తుఫాను / భారీ వర్షం')}
-                      </option>
-                      <option value="other">
-                        {t('Other', 'ఇతర')}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="form-row">
-                  <label>
-                    {t('Severity:', 'సీవిరిటీ:')}
-                    <select
-                      value={filters.severity}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          severity: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="all">{t('All', 'అన్నీ')}</option>
-                      <option value="low">
-                        {t('Low', 'తక్కువ')}
-                      </option>
-                      <option value="medium">
-                        {t('Medium', 'మధ్యస్థ')}
-                      </option>
-                      <option value="high">
-                        {t('High', 'ఎక్కువ')}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="form-row">
-                  <label>
-                    {t('Time Range:', 'సమయ పరిధి:')}
-                    <select
-                      value={filters.timeRange}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          timeRange: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="all">{t('All', 'అన్నీ')}</option>
-                      <option value="1">
-                        {t('Last 1 hour', 'గత 1 గంట')}
-                      </option>
-                      <option value="6">
-                        {t('Last 6 hours', 'గత 6 గంటలు')}
-                      </option>
-                      <option value="24">
-                        {t('Last 24 hours', 'గత 24 గంటలు')}
-                      </option>
-                      <option value="168">
-                        {t('Last 7 days', 'గత 7 రోజులు')}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="form-row">
-                  <label>
-                    {t('Max incidents:', 'గరిష్ట సంఘటనలు:')}
-                    <select
-                      value={filters.maxCount}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          maxCount: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="all">
-                        {t('All available', 'అన్నీ')}
-                      </option>
-                      <option value="50">
-                        {t('Latest 50', 'తాజా 50')}
-                      </option>
-                      <option value="100">
-                        {t('Latest 100', 'తాజా 100')}
-                      </option>
-                      <option value="200">
-                        {t('Latest 200', 'తాజా 200')}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="form-row row-inline">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={showDensity}
-                      onChange={(e) =>
-                        setShowDensity(e.target.checked)
-                      }
-                    />
-                    {t(
-                      'Show density overlay on map',
-                      'మ్యాప్‌పై డెన్సిటీ చూపించు'
-                    )}
-                  </label>
-                </div>
-
-                <div className="form-row row-inline">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={timePlaybackEnabled}
-                      onChange={(e) =>
-                        setTimePlaybackEnabled(e.target.checked)
-                      }
-                    />
-                    {t(
-                      'Enable time playback',
-                      'టైమ్ ప్లేబ్యాక్ ఆన్ చేయి'
-                    )}
-                  </label>
-                </div>
-
-                {timePlaybackEnabled &&
-                  earliestTs !== null &&
-                  latestTs !== null && (
-                    <div className="time-slider">
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={playbackSlider}
-                        onChange={(e) =>
-                          setPlaybackSlider(
-                            Number(e.target.value)
-                          )
-                        }
-                      />
-                      <div className="time-slider-info">
-                        {t(
-                          'Showing incidents up to:',
-                          'ఈ సమయం వరకు సంఘటనలు:'
-                        )}{' '}
-                        <strong>
-                          {new Date(
-                            cutoffTs || latestTs
-                          ).toLocaleString()}
-                        </strong>{' '}
-                        ({playbackSlider}%)
+                      <div>
+                        <div>
+                          <strong>{inc.type.toUpperCase()}</strong> (
+                          {inc.severity})
+                        </div>
+                        <div style={{ color: "#9ca3af" }}>
+                          {inc.description || "No description"}
+                        </div>
+                        <div style={{ color: "#6b7280", fontSize: "0.8rem" }}>
+                          {inc.lat.toFixed(4)}, {inc.lng.toFixed(4)} •{" "}
+                          {new Date(inc.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          gap: "0.25rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...badgeStyles,
+                            padding: "0.15rem 0.5rem",
+                            borderRadius: "999px",
+                            fontSize: "0.7rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {status.toUpperCase()}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "#9ca3af",
+                          }}
+                        >
+                          ✅ {inc.confirmations || 0} | 🚩 {inc.flags || 0}
+                        </span>
                       </div>
                     </div>
-                  )}
 
-                <div className="form-actions">
-                  <button onClick={fetchIncidents}>
-                    {t('Apply Filters', 'ఫిల్టర్లు అప్లై చేయి')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleExportCSV}
-                    className="btn-secondary"
-                  >
-                    {t(
-                      'Export visible incidents (CSV)',
-                      'కనిపించే సంఘటనలను CSV గా ఎగుమతి చేయి'
-                    )}
-                  </button>
-                </div>
-              </section>
-
-              <section className="card">
-                <h2>
-                  {t(
-                    'Recent Incidents (after filters & timeline)',
-                    'తాజా సంఘటనలు (ఫిల్టర్ల & టైమ్‌లైన్ తర్వాత)'
-                  )}
-                </h2>
-                {loadingIncidents ? (
-                  <p>
-                    {t(
-                      'Loading incidents...',
-                      'సంఘటనలు లోడ్ అవుతున్నాయి...'
-                    )}
-                  </p>
-                ) : displayIncidents.length === 0 ? (
-                  <p>
-                    {t(
-                      'No incidents match current filters / timeline.',
-                      'ప్రస్తుత ఫిల్టర్ల / టైమ్‌లైన్‌కి సరిపడే సంఘటనలు లేవు.'
-                    )}
-                  </p>
-                ) : (
-                  <ul className="incident-list">
-                    {displayIncidents.slice(0, 10).map((inc) => (
-                      <li key={inc._id}>
-                        <span className="badge badge-type">
-                          {inc.type.toUpperCase()}
-                        </span>
-                        <span className={`badge badge-${inc.severity}`}>
-                          {inc.severity}
-                        </span>
-                        <div className="incident-main">
-                          <div className="incident-line">
-                            {inc.lat.toFixed(4)},{' '}
-                            {inc.lng.toFixed(4)} •{' '}
-                            {new Date(
-                              inc.createdAt
-                            ).toLocaleString()}
-                          </div>
-                          {inc.description && (
-                            <div className="incident-desc">
-                              {inc.description}
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </div>
-          </div>
-        )}
-
-        {/* OPERATIONS PAGE */}
-        {activePage === 'operations' && (
-          <div className="page-grid">
-            <div className="column">
-              <section className="card">
-                <h2>
-                  {t(
-                    'Report New Incident',
-                    'కొత్త సంఘటన రిపోర్ట్ చేయి'
-                  )}
-                </h2>
-                <p className="card-hint">
-                  {t(
-                    'Click the map in "New incident" mode to auto-fill coordinates.',
-                    '"New incident" మోడ్‌లో మ్యాప్‌పై క్లిక్ చేస్తే లొకేషన్ ఆటో ఫిల్ అవుతుంది.'
-                  )}
-                </p>
-                <form onSubmit={handleCreateIncident}>
-                  <div className="form-row">
-                    <label>
-                      {t('Type:', 'రకం:')}
-                      <select
-                        value={formData.type}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            type: e.target.value,
-                          }))
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "0.35rem",
+                        marginTop: "0.3rem",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        disabled={hasVoted || voteLoadingId === inc._id}
+                        onClick={() =>
+                          handleVoteOnIncident(inc._id, "confirm")
                         }
+                        style={{
+                          padding: "0.25rem 0.5rem",
+                          borderRadius: "999px",
+                          border: "none",
+                          background: hasVoted
+                            ? "#111827"
+                            : "linear-gradient(to right, #22c55e, #16a34a)",
+                          color: hasVoted ? "#6b7280" : "#0b1120",
+                          fontSize: "0.75rem",
+                          cursor: hasVoted ? "default" : "pointer",
+                        }}
                       >
-                        <option value="flood">
-                          {t(
-                            'Flood / Waterlogging',
-                            'వరద / నీటి నిల్వ'
-                          )}
-                        </option>
-                        <option value="fire">
-                          {t(
-                            'Fire / Smoke',
-                            'అగ్ని ప్రమాదం / పొగ'
-                          )}
-                        </option>
-                        <option value="accident">
-                          {t(
-                            'Accident / Road Block',
-                            'రోడ్ ప్రమాదం / బ్లాక్'
-                          )}
-                        </option>
-                        <option value="storm">
-                          {t(
-                            'Storm / Heavy Rain',
-                            'తుఫాను / భారీ వర్షం'
-                          )}
-                        </option>
-                        <option value="other">
-                          {t('Other', 'ఇతర')}
-                        </option>
-                      </select>
-                    </label>
-                  </div>
+                        {hasVoted
+                          ? "Already voted"
+                          : voteLoadingId === inc._id
+                          ? "Submitting..."
+                          : "Confirm"}
+                      </button>
 
-                  <div className="form-row">
-                    <label>
-                      {t('Severity:', 'సీవిరిటీ:')}
-                      <select
-                        value={formData.severity}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            severity: e.target.value,
-                          }))
+                      <button
+                        type="button"
+                        disabled={hasVoted || voteLoadingId === inc._id}
+                        onClick={() =>
+                          handleVoteOnIncident(inc._id, "flag")
                         }
+                        style={{
+                          padding: "0.25rem 0.5rem",
+                          borderRadius: "999px",
+                          border: "1px solid #b91c1c",
+                          background: hasVoted ? "#111827" : "#020617",
+                          color: "#fca5a5",
+                          fontSize: "0.75rem",
+                          cursor: hasVoted ? "default" : "pointer",
+                        }}
                       >
-                        <option value="low">
-                          {t('Low', 'తక్కువ')}
-                        </option>
-                        <option value="medium">
-                          {t('Medium', 'మధ్యస్థ')}
-                        </option>
-                        <option value="high">
-                          {t('High', 'ఎక్కువ')}
-                        </option>
-                      </select>
-                    </label>
-                  </div>
+                        {hasVoted
+                          ? "Already voted"
+                          : voteLoadingId === inc._id
+                          ? "Submitting..."
+                          : "Mark fake"}
+                      </button>
 
-                  <div className="form-row">
-                    <label>
-                      {t('Description:', 'వివరణ:')}
-                      <div className="input-with-button">
-                        <input
-                          type="text"
-                          value={formData.description}
-                          onChange={(e) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              description: e.target.value,
-                            }))
-                          }
-                          placeholder={t(
-                            'Optional',
-                            'ఐచ్చికం'
-                          )}
-                        />
+                      {isAdmin && (
                         <button
                           type="button"
-                          onClick={handleStartVoice}
-                          disabled={isRecording}
-                          className="btn-outline"
+                          onClick={() => handleDeleteIncident(inc._id)}
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            borderRadius: "999px",
+                            border: "1px solid #ef4444",
+                            background: "#020617",
+                            color: "#fecaca",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            marginLeft: "auto",
+                          }}
                         >
-                          {isRecording
-                            ? t('Listening...', 'వింటోంది...')
-                            : t('🎤 Speak', '🎤 మాట్లాడి')}
+                          Delete
                         </button>
-                      </div>
-                    </label>
-                  </div>
-
-                  <div className="form-row two-cols">
-                    <label>
-                      {t('Latitude:', 'అక్షాంశం:')}
-                      <input
-                        type="number"
-                        value={formData.lat}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            lat: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                    <label>
-                      {t('Longitude:', 'రేఖాంశం:')}
-                      <input
-                        type="number"
-                        value={formData.lng}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            lng: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="form-actions">
-                    <button type="submit">
-                      {t(
-                        'Submit Incident',
-                        'సంఘటనను సబ్మిట్ చేయి'
                       )}
-                    </button>
-                  </div>
-                </form>
-              </section>
-
-              <section className="card">
-                <h2>
-                  {t(
-                    'Check Route Safety',
-                    'రూట్ భద్రతను చెక్ చేయి'
-                  )}
-                </h2>
-                <p className="card-hint">
-                  {t(
-                    'Use "Route start" / "Route end" map modes to pick coordinates.',
-                    '"Route start" / "Route end" మోడ్‌లతో మ్యాప్‌పై క్లిక్ చేసి కోఆర్డినేట్లు సెట్ చేయండి.'
-                  )}
-                </p>
-                <form onSubmit={handleRouteCheck}>
-                  <div className="form-row two-cols">
-                    <label>
-                      {t('Start Lat:', 'స్టార్ట్ అక్షాంశం:')}
-                      <input
-                        type="number"
-                        value={routeForm.startLat}
-                        onChange={(e) =>
-                          setRouteForm((prev) => ({
-                            ...prev,
-                            startLat: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                    <label>
-                      {t('Start Lng:', 'స్టార్ట్ రేఖాంశం:')}
-                      <input
-                        type="number"
-                        value={routeForm.startLng}
-                        onChange={(e) =>
-                          setRouteForm((prev) => ({
-                            ...prev,
-                            startLng: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="form-row two-cols">
-                    <label>
-                      {t('End Lat:', 'ఎండ్ అక్షాంశం:')}
-                      <input
-                        type="number"
-                        value={routeForm.endLat}
-                        onChange={(e) =>
-                          setRouteForm((prev) => ({
-                            ...prev,
-                            endLat: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                    <label>
-                      {t('End Lng:', 'ఎండ్ రేఖాంశం:')}
-                      <input
-                        type="number"
-                        value={routeForm.endLng}
-                        onChange={(e) =>
-                          setRouteForm((prev) => ({
-                            ...prev,
-                            endLng: e.target.value,
-                          }))
-                        }
-                        step="0.00001"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="form-actions">
-                    <button type="submit">
-                      {t(
-                        'Check Safety',
-                        'భద్రత చెక్ చేయి'
-                      )}
-                    </button>
-                  </div>
-                </form>
-
-                {routeError && (
-                  <p className="error-text">{routeError}</p>
-                )}
-
-                {routeResult && (
-                  <div className="route-result">
-                    <p>
-                      <strong>{t('Score:', 'స్కోర్:')}</strong>{' '}
-                      {routeResult.score}/100
-                    </p>
-                    <p>
-                      <strong>{t('Label:', 'లేబుల్:')}</strong>{' '}
-                      {routeResult.label}
-                    </p>
-                    <p>{routeResult.message}</p>
-                    <p>
-                      <strong>
-                        {t(
-                          'Incidents near route:',
-                          'రూట్ దగ్గర సంఘటనలు:'
-                        )}
-                      </strong>{' '}
-                      {routeResult.nearbyCount}
-                    </p>
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <div className="column">
-              <section className="card card-map">
-                <div className="card-header-row">
-                  <div>
-                    <h2>{t('Live Map', 'లైవ్ మ్యాప్')}</h2>
-                    <p className="card-hint">
-                      {t(
-                        'View all incidents, density and your current position.',
-                        'అన్ని సంఘటనలు, డెన్సిటీ & మీ లొకేషన్ చూడండి.'
-                      )}
-                    </p>
-                  </div>
-                  <div className="map-buttons">
-                    <button
-                      onClick={handleLocateMe}
-                      disabled={locating}
-                    >
-                      {locating
-                        ? t(
-                            'Locating you...',
-                            'మీ లొకేషన్ తీసుకుంటోంది...'
-                          )
-                        : t(
-                            'Locate Me',
-                            'నా లొకేషన్ చెక్ చేయి'
-                          )}
-                    </button>
-                    <button
-                      onClick={handleQuickSOS}
-                      disabled={sosLoading}
-                      className="btn-danger"
-                    >
-                      {sosLoading
-                        ? t(
-                            'Sending SOS...',
-                            'SOS పంపుతోంది...'
-                          )
-                        : t(
-                            '🚨 Quick SOS',
-                            '🚨 క్విక్ SOS'
-                          )}
-                    </button>
-                  </div>
-                </div>
-
-                {userRiskText && (
-                  <p className="user-risk">{userRiskText}</p>
-                )}
-
-                {proximityStats && (
-                  <div className="radar-card">
-                    <strong>
-                      {t(
-                        'Nearby Risk Radar',
-                        'దగ్గర రిస్క్ రాడార్'
-                      )}
-                    </strong>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>{t('Radius', 'రేడియస్')}</th>
-                          <th>{t('Total', 'మొత్తం')}</th>
-                          <th>
-                            {t(
-                              'High severity',
-                              'హై సీవిరిటీ'
-                            )}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {proximityStats.map((row) => (
-                          <tr key={row.label}>
-                            <td>{row.label}</td>
-                            <td>{row.total}</td>
-                            <td>{row.high}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="map-mode-toggle">
-                  <span>
-                    {t(
-                      'Map click mode:',
-                      'మ్యాప్ క్లిక్ మోడ్:'
-                    )}
-                  </span>
-                  <label>
-                    <input
-                      type="radio"
-                      value="incident"
-                      checked={mapClickMode === 'incident'}
-                      onChange={() =>
-                        setMapClickMode('incident')
-                      }
-                    />
-                    {t(
-                      'New incident',
-                      'క్రొత్త సంఘటన'
-                    )}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      value="routeStart"
-                      checked={mapClickMode === 'routeStart'}
-                      onChange={() =>
-                        setMapClickMode('routeStart')
-                      }
-                    />
-                    {t('Route start', 'రూట్ స్టార్ట్')}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      value="routeEnd"
-                      checked={mapClickMode === 'routeEnd'}
-                      onChange={() =>
-                        setMapClickMode('routeEnd')
-                      }
-                    />
-                    {t('Route end', 'రూట్ ఎండ్')}
-                  </label>
-                </div>
-
-                <div className="map-inner">
-                  <MapContainer
-                    center={mapCenter}
-                    zoom={mapZoom}
-                    style={{ height: '100%', width: '100%' }}
-                  >
-                    <MapClickHandler onMapClick={handleMapClick} />
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
-                    {hasRouteCoords && (
-                      <Polyline positions={routeLinePositions} />
-                    )}
-
-                    {userLocation && (
-                      <>
-                        <Circle
-                          center={userLocation}
-                          radius={200}
-                          pathOptions={{
-                            color: 'blue',
-                            fillColor: 'blue',
-                            fillOpacity: 0.15,
-                          }}
-                        />
-                        <Marker
-                          position={userLocation}
-                          icon={userIcon}
-                        >
-                          <Popup>
-                            {t(
-                              'You are here',
-                              'మీరు ఇక్కడ ఉన్నారు'
-                            )}
-                          </Popup>
-                        </Marker>
-                      </>
-                    )}
-
-                    {showDensity &&
-                      displayIncidents.map((inc) => (
-                        <Circle
-                          key={`${inc._id}-circle`}
-                          center={[inc.lat, inc.lng]}
-                          radius={getRadiusForSeverity(
-                            inc.severity
-                          )}
-                          pathOptions={{
-                            color: getColorForSeverity(
-                              inc.severity
-                            ),
-                            fillColor: getColorForSeverity(
-                              inc.severity
-                            ),
-                            fillOpacity: 0.15,
-                          }}
-                        />
-                      ))}
-
-                    {displayIncidents.map((inc) => (
-                      <Marker
-                        key={inc._id}
-                        position={[inc.lat, inc.lng]}
-                        icon={
-                          severityIcons[inc.severity] ||
-                          severityIcons.medium
-                        }
-                      >
-                        <Popup>
-                          <strong>
-                            {inc.type.toUpperCase()}
-                          </strong>{' '}
-                          ({inc.severity})<br />
-                          {inc.description ||
-                            t(
-                              'No description',
-                              'వివరణ లేదు'
-                            )}
-                          <br />
-                          {new Date(
-                            inc.createdAt
-                          ).toLocaleString()}
-                        </Popup>
-                      </Marker>
-                    ))}
-                  </MapContainer>
-                </div>
-              </section>
-            </div>
-          </div>
-        )}
-
-        {/* ADMIN PAGE */}
-        {activePage === 'admin' && (
-          <div className="page-grid">
-            <div className="column">
-              <section className="card">
-                <h2>{t('Admin Mode', 'అడ్మిన్ మోడ్')}</h2>
-                <p className="card-hint">
-                  {t(
-                    'Turn on admin to run simulations and delete incidents.',
-                    'సిమ్యులేషన్స్ రన్ చేయడానికి, సంఘటనలు డిలీట్ చేయడానికి అడ్మిన్ మోడ్ ఆన్ చేయండి.'
-                  )}
-                </p>
-                <p>
-                  {t('Current mode:', 'ప్రస్తుత మోడ్:')}{' '}
-                  <strong>
-                    {isAdmin
-                      ? t('ADMIN', 'అడ్మిన్')
-                      : t('VIEW ONLY', 'చూడడం మాత్రమే')}
-                  </strong>
-                </p>
-                {!isAdmin ? (
-                  <>
-                    <div className="form-row">
-                      <label>
-                        {t(
-                          'Admin password:',
-                          'అడ్మిన్ పాస్‌వర్డ్:'
-                        )}
-                        <input
-                          type="password"
-                          value={adminPassword}
-                          onChange={(e) =>
-                            setAdminPassword(e.target.value)
-                          }
-                          placeholder={t(
-                            'Enter admin password',
-                            'అడ్మిన్ పాస్‌వర్డ్ ఇవ్వండి'
-                          )}
-                        />
-                      </label>
                     </div>
-                    <button onClick={handleAdminLogin}>
-                      {t(
-                        'Unlock Admin',
-                        'అడ్మిన్ అన్‌లాక్'
-                      )}
-                    </button>
-                    {adminError && (
-                      <p className="error-text">{adminError}</p>
-                    )}
-                    <p className="card-hint">
-                      {t(
-                        'Demo password:',
-                        'డెమో పాస్‌వర్డ్:'
-                      )}{' '}
-                      <code>guardian123</code>
-                    </p>
-                  </>
-                ) : (
-                  <button
-                    onClick={handleAdminLogout}
-                    className="btn-outline"
-                  >
-                    {t('Lock Admin', 'అడ్మిన్ లాక్')}
-                  </button>
-                )}
-              </section>
-
-              <section className="card">
-                <h2>
-                  {t(
-                    'Quick Demo Scenarios',
-                    'శీఘ్ర డెమో సన్నివేశాలు'
-                  )}
-                </h2>
-                {!isAdmin ? (
-                  <p>
-                    {t(
-                      'Enable Admin Mode to run simulations and clear demo data.',
-                      'సిమ్యులేషన్లు రన్ చేయడానికి, డెమో డేటా క్లియర్ చేయడానికి అడ్మిన్ మోడ్ ఆన్ చేయండి.'
-                    )}
-                  </p>
-                ) : (
-                  <>
-                    <p className="card-hint">
-                      {t(
-                        'Use these to instantly generate realistic hotspots for demo.',
-                        'డెమో కోసం వాస్తవానికి దగ్గరగా ఉండే హాట్‌స్పాట్స్ సిమ్యులేట్ చేయడానికి వీటిని వాడండి.'
-                      )}
-                    </p>
-                    <div className="form-actions">
-                      <button
-                        onClick={() =>
-                          handleScenario('bhimavaramFlood')
-                        }
-                        disabled={scenarioLoading}
-                      >
-                        {scenarioLoading
-                          ? t(
-                              'Working...',
-                              'లోడ్ అవుతోంది...'
-                            )
-                          : t(
-                              'Simulate Flood in Bhimavaram',
-                              'భీమవరం వరద సిమ్యులేట్ చేయి'
-                            )}
-                      </button>
-                      <button
-                        onClick={() =>
-                          handleScenario('cityStorm')
-                        }
-                        disabled={scenarioLoading}
-                        className="btn-outline"
-                      >
-                        {scenarioLoading
-                          ? t(
-                              'Working...',
-                              'లోడ్ అవుతోంది...'
-                            )
-                          : t(
-                              'Simulate City-wide Storm',
-                              'పట్టణం మొత్తం తుఫాను సిమ్యులేట్ చేయి'
-                            )}
-                      </button>
-                    </div>
-                    <button
-                      onClick={handleClearDemoData}
-                      disabled={scenarioLoading}
-                      className="btn-danger"
-                    >
-                      {scenarioLoading
-                        ? t(
-                            'Clearing...',
-                            'క్లియర్ అవుతోంది...'
-                          )
-                        : t(
-                            'Clear Demo Data (Admin only)',
-                            'డెమో డేటా క్లియర్ చేయి (అడ్మిన్ మాత్రమే)'
-                          )}
-                    </button>
-                    <p className="card-hint">
-                      {t(
-                        'Simulated incidents are detected by descriptions starting with "Simulated ".',
-                        '"Simulated " తో మొదలయ్యే వివరణల ద్వారా డెమో సంఘటనలు గుర్తిస్తాం.'
-                      )}
-                    </p>
-                  </>
-                )}
-              </section>
+                  </div>
+                );
+              })}
             </div>
+          </section>
 
-            <div className="column">
-              <section className="card">
-                <h2>
-                  {t(
-                    'All Incidents (after filters & timeline)',
-                    'అన్ని సంఘటనలు (ఫిల్టర్ల & టైమ్‌లైన్ తర్వాత)'
-                  )}
-                </h2>
-                {loadingIncidents ? (
-                  <p>
-                    {t(
-                      'Loading incidents...',
-                      'సంఘటనలు లోడ్ అవుతున్నాయి...'
-                    )}
-                  </p>
-                ) : displayIncidents.length === 0 ? (
-                  <p>
-                    {t(
-                      'No incidents match current filters / timeline.',
-                      'ప్రస్తుత ఫిల్టర్ల / టైమ్‌లైన్‌కి సరిపడే సంఘటనలు లేవు.'
-                    )}
-                  </p>
-                ) : (
-                  <ul className="incident-list full">
-                    {displayIncidents.map((inc) => (
-                      <li key={inc._id}>
-                        <span className="badge badge-type">
-                          {inc.type.toUpperCase()}
-                        </span>
-                        <span className={`badge badge-${inc.severity}`}>
-                          {inc.severity}
-                        </span>
-                        <div className="incident-main">
-                          <div className="incident-line">
-                            {inc.lat.toFixed(4)}, {inc.lng.toFixed(4)} •{' '}
-                            {new Date(
-                              inc.createdAt
-                            ).toLocaleString()}
-                          </div>
-                          {inc.description && (
-                            <div className="incident-desc">
-                              {inc.description}
-                            </div>
-                          )}
-                        </div>
-                        {isAdmin && (
-                          <button
-                            onClick={() =>
-                              handleDeleteIncident(inc._id)
-                            }
-                            className="btn-danger small"
-                          >
-                            {t('Delete', 'డిలీట్')}
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+          {/* Admin simulation panel */}
+          <section
+            style={{
+              borderRadius: "0.75rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              padding: "0.75rem 1rem",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "1rem",
+                margin: 0,
+                marginBottom: "0.5rem",
+                color: "#e5e7eb",
+              }}
+            >
+              Admin Controls
+            </h2>
+            <p
+              style={{
+                fontSize: "0.8rem",
+                color: "#9ca3af",
+                marginTop: 0,
+                marginBottom: "0.5rem",
+              }}
+            >
+              Seed synthetic incidents to simulate large-scale disasters for
+              demos and testing.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gap: "0.5rem",
+                fontSize: "0.85rem",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => handleSeedSimulation("flood")}
+                style={{
+                  padding: "0.4rem 0.6rem",
+                  borderRadius: "0.5rem",
+                  border: "none",
+                  background:
+                    "linear-gradient(to right, #22c55e, #4ade80)",
+                  color: "#0b1120",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Simulate Flood Cluster
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSeedSimulation("earthquake")}
+                style={{
+                  padding: "0.4rem 0.6rem",
+                  borderRadius: "0.5rem",
+                  border: "none",
+                  background:
+                    "linear-gradient(to right, #f97316, #ea580c)",
+                  color: "#0b1120",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Simulate Earthquake Wave
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearSimulations}
+                style={{
+                  padding: "0.4rem 0.6rem",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #f97373",
+                  background: "#020617",
+                  color: "#fecaca",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  marginTop: "0.25rem",
+                }}
+              >
+                Clear Simulation Incidents
+              </button>
+
+              <div
+                style={{
+                  marginTop: "0.5rem",
+                  fontSize: "0.8rem",
+                  color: "#9ca3af",
+                }}
+              >
+                <strong>Total incidents:</strong> {incidents.length}
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* HELP PAGE */}
-        {activePage === 'help' && (
-          <div className="page-single">
-            <section className="card">
-              <h2>{t('How to demo this project', 'ఈ ప్రాజెక్ట్ డెమో ఎలా చేయాలి')}</h2>
-              <ol className="help-list">
-                <li>
-                  <strong>Dashboard tab:</strong> Explain the <em>Overview</em> stats, severity-wise risk and charts.
-                </li>
-                <li>
-                  <strong>Live Operations tab:</strong> Show:
-                  <ul>
-                    <li>Map with live incidents + density overlay</li>
-                    <li>
-                      <code>Locate Me</code> + <code>Nearby Risk Radar</code>
-                    </li>
-                    <li>
-                      <code>🚨 Quick SOS</code> from your location
-                    </li>
-                    <li>Voice-based incident reporting using the mic button</li>
-                  </ul>
-                </li>
-                <li>
-                  <strong>Admin & Simulations tab:</strong> Unlock admin, generate simulated disasters, and clear demo data.
-                </li>
-                <li>
-                  <strong>Language toggle:</strong> Switch between EN/TE and mention local-language focus.
-                </li>
-              </ol>
-              <p className="card-hint">
-                You can say:{" "}
-                <em>
-                  “Disaster Guardian gives a control room a single pane of glass
-                  for nearby risk, live incidents, safe routing and quick SOS
-                  reporting — in both English and Telugu.”
-                </em>
-              </p>
-            </section>
-          </div>
-        )}
-      </main>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

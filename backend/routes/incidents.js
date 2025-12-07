@@ -1,5 +1,3 @@
-// backend/routes/incidents.js
-
 const express = require("express");
 const router = express.Router();
 const Incident = require("../models/Incident");
@@ -30,6 +28,7 @@ router.post("/", async (req, res) => {
       lat,
       lng,
       description,
+      isSimulation: false, // user-created
     });
 
     const saved = await incident.save();
@@ -40,58 +39,9 @@ router.post("/", async (req, res) => {
   }
 });
 
-// DELETE INCIDENT
-router.delete("/:id", async (req, res) => {
-  try {
-    const deleted = await Incident.findByIdAndDelete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ message: "Not found" });
-    }
-    res.json({ message: "Incident deleted" });
-  } catch (err) {
-    console.error("Delete error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+// --- SIMULATION ROUTES (come BEFORE /:id delete!) ---
 
-// VOTING / VERIFICATION
-router.post("/:id/vote", async (req, res) => {
-  try {
-    const { userId, vote } = req.body;
-    const incident = await Incident.findById(req.params.id);
-
-    if (!incident) return res.status(404).json({ message: "Not found" });
-
-    if (incident.confirmVoters.includes(userId) || incident.flagVoters.includes(userId)) {
-      return res.json({ message: "Already voted", incident });
-    }
-
-    if (vote === "confirm") {
-      incident.confirmations++;
-      incident.confirmVoters.push(userId);
-    } else if (vote === "flag") {
-      incident.flags++;
-      incident.flagVoters.push(userId);
-    }
-
-    // Update status
-    if (incident.confirmations >= 3 && incident.flags === 0) {
-      incident.verificationStatus = "verified";
-    } else if (incident.flags >= 2 && incident.confirmations === 0) {
-      incident.verificationStatus = "suspicious";
-    } else {
-      incident.verificationStatus = "unverified";
-    }
-
-    await incident.save();
-    res.json({ message: "Vote saved", incident });
-  } catch (err) {
-    console.error("Vote error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// SIMULATION ROUTE
+// SEED SIMULATIONS
 router.post("/seed", async (req, res) => {
   try {
     const { type = "flood" } = req.body;
@@ -117,6 +67,7 @@ router.post("/seed", async (req, res) => {
           type === "flood"
             ? "Simulated flood hotspot in Bhimavaram"
             : "Simulated earthquake hotspot in Bhimavaram",
+        isSimulation: true,
       });
     }
 
@@ -128,15 +79,70 @@ router.post("/seed", async (req, res) => {
   }
 });
 
-// CLEAR SIMULATIONS
+// CLEAR ALL SIMULATION INCIDENTS
 router.delete("/clear-simulations", async (req, res) => {
   try {
-    const deleted = await Incident.deleteMany({
-      description: /Simulated (flood|earthquake)/i,
+    const deleted = await Incident.deleteMany({ isSimulation: true });
+    res.json({
+      deletedCount: deleted.deletedCount,
+      message: "Simulation incidents cleared",
     });
-    res.json({ deletedCount: deleted.deletedCount });
   } catch (err) {
-    console.error("Clear error:", err);
+    console.error("Clear simulations error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// --- VOTING / VERIFICATION ---
+
+router.post("/:id/vote", async (req, res) => {
+  try {
+    const { userId, vote } = req.body;
+    const incident = await Incident.findById(req.params.id);
+
+    if (!incident) return res.status(404).json({ message: "Not found" });
+
+    if (
+      incident.confirmVoters.includes(userId) ||
+      incident.flagVoters.includes(userId)
+    ) {
+      return res.json({ message: "Already voted", incident });
+    }
+
+    if (vote === "confirm") {
+      incident.confirmations++;
+      incident.confirmVoters.push(userId);
+    } else if (vote === "flag") {
+      incident.flags++;
+      incident.flagVoters.push(userId);
+    }
+
+    if (incident.confirmations >= 3 && incident.flags === 0) {
+      incident.verificationStatus = "verified";
+    } else if (incident.flags >= 2 && incident.confirmations === 0) {
+      incident.verificationStatus = "suspicious";
+    } else {
+      incident.verificationStatus = "unverified";
+    }
+
+    await incident.save();
+    res.json({ message: "Vote saved", incident });
+  } catch (err) {
+    console.error("Vote error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE INCIDENT BY ID (for admin)
+router.delete("/:id", async (req, res) => {
+  try {
+    const deleted = await Incident.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ message: "Not found" });
+    }
+    res.json({ message: "Incident deleted" });
+  } catch (err) {
+    console.error("Delete error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });

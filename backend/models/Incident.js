@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const incidentSchema = new mongoose.Schema(
   {
@@ -8,8 +8,8 @@ const incidentSchema = new mongoose.Schema(
     },
     severity: {
       type: String,
-      enum: ['low', 'medium', 'high'],
-      default: 'medium',
+      enum: ["low", "medium", "high"],
+      default: "medium",
     },
     description: {
       type: String,
@@ -23,40 +23,33 @@ const incidentSchema = new mongoose.Schema(
       required: true,
     },
 
-    // 🔽 NEW FIELDS FOR VERIFICATION 🔽
-
-    // How many people confirmed this incident is real
+    // Voting / verification
     confirmations: {
       type: Number,
       default: 0,
     },
-
-    // How many people marked it as fake
     flags: {
       type: Number,
       default: 0,
     },
-
-    // Which users have already confirmed (to avoid multiple votes)
     confirmVoters: {
       type: [String],
       default: [],
     },
-
-    // Which users have already flagged (to avoid multiple votes)
     flagVoters: {
       type: [String],
       default: [],
     },
-
-    // Current verification status of the incident
-    // unverified  = not enough info yet
-    // verified    = trusted by multiple people
-    // suspicious  = many people think it's fake
     verificationStatus: {
       type: String,
-      enum: ['unverified', 'verified', 'suspicious'],
-      default: 'unverified',
+      enum: ["unverified", "verified", "suspicious"],
+      default: "unverified",
+    },
+
+    // NEW: mark which incidents are from simulation
+    isSimulation: {
+      type: Boolean,
+      default: false,
     },
   },
   {
@@ -64,4 +57,4 @@ const incidentSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model('Incident', incidentSchema);
+module.exports = mongoose.model("Incident", incidentSchema);

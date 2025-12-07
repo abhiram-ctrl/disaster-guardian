@@ -112,3 +112,66 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+// POST /api/incidents/:id/vote
+// body: { userId: string, vote: 'confirm' | 'flag' }
+router.post('/:id/vote', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, vote } = req.body;
+
+    if (!userId || !vote) {
+      return res
+        .status(400)
+        .json({ message: 'userId and vote are required.' });
+    }
+
+    if (vote !== 'confirm' && vote !== 'flag') {
+      return res.status(400).json({ message: 'Invalid vote type.' });
+    }
+
+    const incident = await Incident.findById(id);
+    if (!incident) {
+      return res.status(404).json({ message: 'Incident not found.' });
+    }
+
+    // If user already voted, don't count again
+    const alreadyConfirmed = incident.confirmVoters.includes(userId);
+    const alreadyFlagged = incident.flagVoters.includes(userId);
+
+    if (alreadyConfirmed || alreadyFlagged) {
+      return res.status(200).json({
+        message: 'You have already voted on this incident.',
+        incident,
+      });
+    }
+
+    if (vote === 'confirm') {
+      incident.confirmations += 1;
+      incident.confirmVoters.push(userId);
+    } else if (vote === 'flag') {
+      incident.flags += 1;
+      incident.flagVoters.push(userId);
+    }
+
+    // Simple logic for verification status
+    // You can tweak these numbers later if you want
+    if (incident.confirmations >= 3 && incident.flags === 0) {
+      incident.verificationStatus = 'verified';
+    } else if (incident.flags >= 2 && incident.confirmations === 0) {
+      incident.verificationStatus = 'suspicious';
+    } else {
+      incident.verificationStatus = 'unverified';
+    }
+
+    await incident.save();
+
+    res.json({
+      message: 'Vote recorded successfully.',
+      incident,
+    });
+  } catch (err) {
+    console.error('Error voting on incident:', err);
+    res.status(500).json({ message: 'Server error while voting.' });
+  }
+});
+

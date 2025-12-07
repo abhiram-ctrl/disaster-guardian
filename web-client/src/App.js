@@ -23,10 +23,16 @@ L.Icon.Default.mergeOptions({
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-// Use env var in production, localhost in dev
+// Use env var in production, Render URL in dev if not set
 const API_BASE =
-  process.env.REACT_APP_API_BASE || "https://disaster-guardian-api.onrender.com";
+  process.env.REACT_APP_API_BASE ||
+  "https://disaster-guardian-api.onrender.com";
 
+// For voice recognition
+const SpeechRecognition =
+  typeof window !== "undefined"
+    ? window.SpeechRecognition || window.webkitSpeechRecognition
+    : null;
 
 function App() {
   // Core data
@@ -34,7 +40,7 @@ function App() {
   const [loadingIncidents, setLoadingIncidents] = useState(false);
   const [incidentError, setIncidentError] = useState("");
 
-  // New: userId for voting
+  // Voting
   const [userId, setUserId] = useState("");
   const [voteLoadingId, setVoteLoadingId] = useState(null);
   const [voteError, setVoteError] = useState("");
@@ -48,6 +54,10 @@ function App() {
     description: "",
   });
 
+  // Voice input state
+  const [isListening, setIsListening] = useState(false);
+  const [speechError, setSpeechError] = useState("");
+
   // Risk checker
   const [riskLat, setRiskLat] = useState("");
   const [riskLng, setRiskLng] = useState("");
@@ -56,11 +66,11 @@ function App() {
   const [riskError, setRiskError] = useState("");
 
   // Map view
-  const [mapCenter, setMapCenter] = useState([16.5449, 81.5212]); // default: Bhimavaram
+  const [mapCenter, setMapCenter] = useState([16.5449, 81.5212]); // Bhimavaram
   const [mapZoom, setMapZoom] = useState(6);
-  const [riskRadius] = useState(5000); // 5km circle for risk highlight
+  const [riskRadius] = useState(5000); // 5km
 
-  // Simple admin toggle (for show/hide admin tools)
+  // Simple admin toggle
   const [isAdmin] = useState(true);
 
   // ----------- INIT: create unique userId for this browser -------------
@@ -234,6 +244,66 @@ function App() {
     }
   };
 
+  // ---------------- VOICE INPUT HANDLER ----------------
+  const handleSpeakDescription = () => {
+    setSpeechError("");
+
+    if (!SpeechRecognition) {
+      setSpeechError(
+        "Voice input is not supported in this browser. Try using Chrome on desktop or Android."
+      );
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-IN"; // You can change to "te-IN" for Telugu
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        setSpeechError("Could not recognize speech. Please try again.");
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setNewIncident((prev) => ({
+          ...prev,
+          description: prev.description
+            ? prev.description + " " + transcript
+            : transcript,
+        }));
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch (err) {
+      console.error("Speech error:", err);
+      setSpeechError("Voice input failed to start.");
+      setIsListening(false);
+    }
+  };
+
+  // ---------------- DASHBOARD STATS ----------------
+  const totalIncidents = incidents.length;
+  const verifiedCount = incidents.filter(
+    (i) => i.verificationStatus === "verified"
+  ).length;
+  const suspiciousCount = incidents.filter(
+    (i) => i.verificationStatus === "suspicious"
+  ).length;
+  const highSeverityCount = incidents.filter(
+    (i) => i.severity === "high"
+  ).length;
+
   // ---------------- UTILS ----------------
   const getVerificationBadgeStyles = (status) => {
     switch (status) {
@@ -263,7 +333,8 @@ function App() {
         background: "#0f172a",
         color: "#e5e7eb",
         padding: "1.5rem",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily:
+          "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
       <div
@@ -284,7 +355,7 @@ function App() {
             justifyContent: "space-between",
             alignItems: "flex-start",
             gap: "1rem",
-            marginBottom: "1.5rem",
+            marginBottom: "1rem",
           }}
         >
           <div>
@@ -320,6 +391,77 @@ function App() {
             <div>API: {API_BASE}</div>
           </div>
         </header>
+
+        {/* Stats row */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: "0.75rem",
+            marginBottom: "1.25rem",
+          }}
+        >
+          <div
+            style={{
+              padding: "0.6rem 0.75rem",
+              borderRadius: "0.75rem",
+              background: "rgba(37, 99, 235, 0.15)",
+              border: "1px solid rgba(59, 130, 246, 0.4)",
+            }}
+          >
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+              Total Incidents
+            </div>
+            <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
+              {totalIncidents}
+            </div>
+          </div>
+          <div
+            style={{
+              padding: "0.6rem 0.75rem",
+              borderRadius: "0.75rem",
+              background: "rgba(22, 163, 74, 0.15)",
+              border: "1px solid rgba(34, 197, 94, 0.4)",
+            }}
+          >
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+              Verified Incidents
+            </div>
+            <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
+              {verifiedCount}
+            </div>
+          </div>
+          <div
+            style={{
+              padding: "0.6rem 0.75rem",
+              borderRadius: "0.75rem",
+              background: "rgba(248, 113, 113, 0.12)",
+              border: "1px solid rgba(248, 113, 113, 0.6)",
+            }}
+          >
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+              Suspicious Incidents
+            </div>
+            <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
+              {suspiciousCount}
+            </div>
+          </div>
+          <div
+            style={{
+              padding: "0.6rem 0.75rem",
+              borderRadius: "0.75rem",
+              background: "rgba(251, 191, 36, 0.12)",
+              border: "1px solid rgba(251, 191, 36, 0.6)",
+            }}
+          >
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+              High Severity Incidents
+            </div>
+            <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
+              {highSeverityCount}
+            </div>
+          </div>
+        </div>
 
         {/* Top layout: Map + Risk checker */}
         <div
@@ -416,7 +558,10 @@ function App() {
               Check Risk at Location
             </h2>
 
-            <form onSubmit={handleRiskCheck} style={{ display: "grid", gap: "0.5rem" }}>
+            <form
+              onSubmit={handleRiskCheck}
+              style={{ display: "grid", gap: "0.5rem" }}
+            >
               <label style={{ fontSize: "0.85rem" }}>
                 Latitude
                 <input
@@ -535,7 +680,7 @@ function App() {
           </section>
         </div>
 
-        {/* Bottom layout: Operations + Incidents + Admin */}
+        {/* Bottom layout: Report + Incidents + Admin */}
         <div
           style={{
             display: "grid",
@@ -543,7 +688,7 @@ function App() {
             gap: "1rem",
           }}
         >
-          {/* Create incident */}
+          {/* Report Incident */}
           <section
             style={{
               borderRadius: "0.75rem",
@@ -698,6 +843,47 @@ function App() {
                 />
               </label>
 
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  alignItems: "center",
+                  marginTop: "0.25rem",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={handleSpeakDescription}
+                  style={{
+                    padding: "0.35rem 0.6rem",
+                    borderRadius: "999px",
+                    border: "1px solid #4b5563",
+                    background: "#020617",
+                    color: "#e5e7eb",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                  }}
+                >
+                  <span>🎤</span>
+                  <span>
+                    {isListening ? "Listening..." : "Speak Description"}
+                  </span>
+                </button>
+                {speechError && (
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "#f97373",
+                    }}
+                  >
+                    {speechError}
+                  </span>
+                )}
+              </div>
+
               <button
                 type="submit"
                 style={{
@@ -801,7 +987,9 @@ function App() {
                         <div style={{ color: "#9ca3af" }}>
                           {inc.description || "No description"}
                         </div>
-                        <div style={{ color: "#6b7280", fontSize: "0.8rem" }}>
+                        <div
+                          style={{ color: "#6b7280", fontSize: "0.8rem" }}
+                        >
                           {inc.lat.toFixed(4)}, {inc.lng.toFixed(4)} •{" "}
                           {new Date(inc.createdAt).toLocaleString()}
                         </div>

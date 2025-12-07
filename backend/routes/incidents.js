@@ -18,17 +18,22 @@ router.post("/", async (req, res) => {
   try {
     const { type, severity, lat, lng, description } = req.body;
 
-    if (typeof lat !== "number" || typeof lng !== "number") {
-      return res.status(400).json({ message: "lat/lng must be numbers" });
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+
+    if (Number.isNaN(latNum) || Number.isNaN(lngNum)) {
+      return res
+        .status(400)
+        .json({ message: "lat/lng must be valid numbers" });
     }
 
     const incident = new Incident({
       type,
       severity,
-      lat,
-      lng,
+      lat: latNum,
+      lng: lngNum,
       description,
-      isSimulation: false, // user-created
+      isSimulation: false,
     });
 
     const saved = await incident.save();
@@ -39,7 +44,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// --- SIMULATION ROUTES (come BEFORE /:id delete!) ---
+// --- SIMULATION ROUTES (before /:id!) ---
 
 // SEED SIMULATIONS
 router.post("/seed", async (req, res) => {

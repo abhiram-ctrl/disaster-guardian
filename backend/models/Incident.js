@@ -46,7 +46,7 @@ const incidentSchema = new mongoose.Schema(
       default: "unverified",
     },
 
-    // NEW: mark which incidents are from simulation
+    // Mark simulation incidents
     isSimulation: {
       type: Boolean,
       default: false,

@@ -1,177 +1,144 @@
-const express = require('express');
-const Incident = require('../models/Incident');
+// backend/routes/incidents.js
 
+const express = require("express");
 const router = express.Router();
+const Incident = require("../models/Incident");
 
-// POST /api/incidents - create new incident
-router.post('/', async (req, res) => {
+// GET ALL INCIDENTS
+router.get("/", async (req, res) => {
   try {
-    const { type, description, lat, lng, severity } = req.body;
+    const incidents = await Incident.find().sort({ createdAt: -1 });
+    res.json(incidents);
+  } catch (err) {
+    console.error("Error fetching incidents:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-    if (type == null || lat == null || lng == null) {
-      return res
-        .status(400)
-        .json({ message: 'type, lat and lng are required fields.' });
+// CREATE INCIDENT
+router.post("/", async (req, res) => {
+  try {
+    const { type, severity, lat, lng, description } = req.body;
+
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      return res.status(400).json({ message: "lat/lng must be numbers" });
     }
 
-    const incident = await Incident.create({
+    const incident = new Incident({
       type,
-      description,
+      severity,
       lat,
       lng,
-      severity: severity || 'medium',
+      description,
     });
 
-    res.status(201).json(incident);
+    const saved = await incident.save();
+    res.status(201).json(saved);
   } catch (err) {
-    console.error('Error creating incident:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("Error creating incident:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-// GET /api/incidents - get all incidents
-router.get('/', async (req, res) => {
+// DELETE INCIDENT
+router.delete("/:id", async (req, res) => {
   try {
-    const { hours, limit } = req.query;
-
-    const query = {};
-
-    if (hours) {
-      const hoursNum = parseFloat(hours);
-      if (!isNaN(hoursNum) && hoursNum > 0) {
-        const since = new Date(Date.now() - hoursNum * 60 * 60 * 1000);
-        query.createdAt = { $gte: since };
-      }
-    }
-
-    let mongoQuery = Incident.find(query).sort({ createdAt: -1 });
-
-    if (limit) {
-      const limitNum = parseInt(limit, 10);
-      if (!isNaN(limitNum) && limitNum > 0) {
-        mongoQuery = mongoQuery.limit(limitNum);
-      }
-    }
-
-    const incidents = await mongoQuery;
-    res.json(incidents);
-  } catch (err) {
-    console.error('Error fetching incidents:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-
-
-// GET /api/incidents/nearby?lat=&lng=&radiusKm=
-router.get('/nearby', async (req, res) => {
-  try {
-    const { lat, lng, radiusKm } = req.query;
-
-    if (lat == null || lng == null) {
-      return res
-        .status(400)
-        .json({ message: 'lat and lng query params are required.' });
-    }
-
-    const radius = parseFloat(radiusKm || '5'); // default 5km
-
-    const latNum = parseFloat(lat);
-    const lngNum = parseFloat(lng);
-
-    // Rough bounding box based on degrees
-    const degRadiusLat = radius / 111; // ~111km per 1 degree lat
-    const degRadiusLng = radius / 111; // rough
-
-    const incidents = await Incident.find({
-      lat: { $gte: latNum - degRadiusLat, $lte: latNum + degRadiusLat },
-      lng: { $gte: lngNum - degRadiusLng, $lte: lngNum + degRadiusLng },
-    }).sort({ createdAt: -1 });
-
-    res.json(incidents);
-  } catch (err) {
-    console.error('Error fetching nearby incidents:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-// DELETE /api/incidents/:id - delete an incident by id
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const deleted = await Incident.findByIdAndDelete(id);
+    const deleted = await Incident.findByIdAndDelete(req.params.id);
     if (!deleted) {
-      return res.status(404).json({ message: 'Incident not found' });
+      return res.status(404).json({ message: "Not found" });
+    }
+    res.json({ message: "Incident deleted" });
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// VOTING / VERIFICATION
+router.post("/:id/vote", async (req, res) => {
+  try {
+    const { userId, vote } = req.body;
+    const incident = await Incident.findById(req.params.id);
+
+    if (!incident) return res.status(404).json({ message: "Not found" });
+
+    if (incident.confirmVoters.includes(userId) || incident.flagVoters.includes(userId)) {
+      return res.json({ message: "Already voted", incident });
     }
 
-    res.json({ message: 'Incident deleted successfully' });
+    if (vote === "confirm") {
+      incident.confirmations++;
+      incident.confirmVoters.push(userId);
+    } else if (vote === "flag") {
+      incident.flags++;
+      incident.flagVoters.push(userId);
+    }
+
+    // Update status
+    if (incident.confirmations >= 3 && incident.flags === 0) {
+      incident.verificationStatus = "verified";
+    } else if (incident.flags >= 2 && incident.confirmations === 0) {
+      incident.verificationStatus = "suspicious";
+    } else {
+      incident.verificationStatus = "unverified";
+    }
+
+    await incident.save();
+    res.json({ message: "Vote saved", incident });
   } catch (err) {
-    console.error('Error deleting incident:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("Vote error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// SIMULATION ROUTE
+router.post("/seed", async (req, res) => {
+  try {
+    const { type = "flood" } = req.body;
+
+    const baseLat = 16.5449;
+    const baseLng = 81.5212;
+
+    const docs = [];
+    const count = type === "earthquake" ? 20 : 30;
+
+    for (let i = 0; i < count; i++) {
+      const offsetLat = (Math.random() - 0.5) * 0.3;
+      const offsetLng = (Math.random() - 0.5) * 0.3;
+      const severities = ["low", "medium", "high"];
+      const severity = severities[Math.floor(Math.random() * 3)];
+
+      docs.push({
+        type,
+        severity,
+        lat: baseLat + offsetLat,
+        lng: baseLng + offsetLng,
+        description:
+          type === "flood"
+            ? "Simulated flood hotspot in Bhimavaram"
+            : "Simulated earthquake hotspot in Bhimavaram",
+      });
+    }
+
+    const created = await Incident.insertMany(docs);
+    res.json({ count: created.length, message: "Simulation seeded" });
+  } catch (err) {
+    console.error("Seed error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// CLEAR SIMULATIONS
+router.delete("/clear-simulations", async (req, res) => {
+  try {
+    const deleted = await Incident.deleteMany({
+      description: /Simulated (flood|earthquake)/i,
+    });
+    res.json({ deletedCount: deleted.deletedCount });
+  } catch (err) {
+    console.error("Clear error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
 module.exports = router;
-// POST /api/incidents/:id/vote
-// body: { userId: string, vote: 'confirm' | 'flag' }
-router.post('/:id/vote', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { userId, vote } = req.body;
-
-    if (!userId || !vote) {
-      return res
-        .status(400)
-        .json({ message: 'userId and vote are required.' });
-    }
-
-    if (vote !== 'confirm' && vote !== 'flag') {
-      return res.status(400).json({ message: 'Invalid vote type.' });
-    }
-
-    const incident = await Incident.findById(id);
-    if (!incident) {
-      return res.status(404).json({ message: 'Incident not found.' });
-    }
-
-    // If user already voted, don't count again
-    const alreadyConfirmed = incident.confirmVoters.includes(userId);
-    const alreadyFlagged = incident.flagVoters.includes(userId);
-
-    if (alreadyConfirmed || alreadyFlagged) {
-      return res.status(200).json({
-        message: 'You have already voted on this incident.',
-        incident,
-      });
-    }
-
-    if (vote === 'confirm') {
-      incident.confirmations += 1;
-      incident.confirmVoters.push(userId);
-    } else if (vote === 'flag') {
-      incident.flags += 1;
-      incident.flagVoters.push(userId);
-    }
-
-    // Simple logic for verification status
-    // You can tweak these numbers later if you want
-    if (incident.confirmations >= 3 && incident.flags === 0) {
-      incident.verificationStatus = 'verified';
-    } else if (incident.flags >= 2 && incident.confirmations === 0) {
-      incident.verificationStatus = 'suspicious';
-    } else {
-      incident.verificationStatus = 'unverified';
-    }
-
-    await incident.save();
-
-    res.json({
-      message: 'Vote recorded successfully.',
-      incident,
-    });
-  } catch (err) {
-    console.error('Error voting on incident:', err);
-    res.status(500).json({ message: 'Server error while voting.' });
-  }
-});
-

@@ -1,36 +1,31 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-require('dotenv').config();
+// backend/server.js
 
-const incidentRoutes = require('./routes/incidents');
-const routeSafetyRoutes = require('./routes/routeSafety');
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
 
-// Middlewares
-app.use(cors());
+// Middleware
 app.use(express.json());
+app.use(cors());
 
-// Health check
-app.get('/', (req, res) => {
-  res.send('Disaster Guardian API is running ✅');
-});
+// Routers
+const incidentsRouter = require("./routes/incidents");
+const riskRouter = require("./routes/risk");
 
-// Routes
-app.use('/api/incidents', incidentRoutes);
-app.use('/api/route', routeSafetyRoutes);
+app.use("/api/incidents", incidentsRouter);
+app.use("/api/risk", riskRouter);
 
-// Connect to MongoDB and start server
+// MongoDB connect
 mongoose
-  .connect(process.env.MONGO_URI, {})
-  .then(() => {
-    console.log('✅ MongoDB connected');
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`🚀 Server listening on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB connection error:', err);
-  });
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
+
+// Server start
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+  console.log(`🚀 Server listening on port ${port}`);
+});
